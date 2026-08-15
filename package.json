@@ -1,0 +1,11 @@
+{
+  "name": "darning-simulator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "./scripts/build_wasm.sh",
+    "test": "./scripts/check.sh",
+    "start": "node scripts/serve.mjs",
+    "render": "cargo run --release --bin darning-render --"
+  }
+}

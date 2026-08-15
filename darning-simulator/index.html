@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Interactive Rust/WebAssembly simulator for darning, star darning, and sashiko reinforcement.">
+  <meta name="darning-build" content="2026-08-16.rust-star-2">
+  <title>Darning simulator</title>
+  <link rel="stylesheet" href="style.css?v=20260816.rust-star-2">
+</head>
+<body>
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Infinite-plane textile model</p>
+      <h1>Darning simulator</h1>
+      <p class="lede">Design a repair path, then inspect its local directional-strength field until the cloth returns to its undamaged baseline.</p>
+    </div>
+    <div id="engine-status" class="engine-status" aria-live="polite">Loading 75 kB Rust/WASM core…</div>
+  </header>
+
+  <nav class="presets" aria-label="Simulation presets">
+    <button type="button" data-preset="base">Untouched base</button>
+    <button type="button" data-preset="hole">Open hole</button>
+    <button type="button" class="active" data-preset="star">Traditional star darn</button>
+    <button type="button" data-preset="darn">Dense darn</button>
+    <button type="button" data-preset="sashiko">Sashiko reinforcement</button>
+    <button type="button" data-preset="tear">Basket-darned tear</button>
+  </nav>
+
+  <main class="layout">
+    <aside class="controls" aria-label="Simulation controls">
+      <details><summary>Base tissue</summary><div class="control-grid">
+        <label>Warp capacity <output data-for="warp-strength"></output><input id="warp-strength" type="range" min="0.2" max="2.5" step="0.05" value="1"></label>
+        <label>Weft capacity <output data-for="weft-strength"></output><input id="weft-strength" type="range" min="0.2" max="2.5" step="0.05" value="0.78"></label>
+        <label>Fabric angle <output data-for="fabric-angle" data-unit="°"></output><input id="fabric-angle" type="range" min="-90" max="90" step="1" value="0"></label>
+        <label>Thread spacing <output data-for="base-spacing" data-unit=" mm"></output><input id="base-spacing" type="range" min="0.6" max="3.2" step="0.1" value="1.6"></label>
+      </div></details>
+      <details open><summary>Damage</summary><div class="control-grid">
+        <label class="wide">Damage type<select id="damage-kind"><option value="0">None (null damage)</option><option value="1">Worn patch</option><option value="2" selected>Hole</option><option value="3">Tear / slit</option></select></label>
+        <label>Half-width <output data-for="damage-x" data-unit=" mm"></output><input id="damage-x" type="range" min="0.8" max="18" step="0.2" value="3.2"></label>
+        <label>Half-height <output data-for="damage-y" data-unit=" mm"></output><input id="damage-y" type="range" min="0.5" max="16" step="0.2" value="3"></label>
+        <label>Damage angle <output data-for="damage-angle" data-unit="°"></output><input id="damage-angle" type="range" min="-90" max="90" step="1" value="0"></label>
+        <label>Severity <output data-for="damage-severity" data-format="percent"></output><input id="damage-severity" type="range" min="0" max="1" step="0.02" value="1"></label>
+      </div></details>
+      <details open><summary>Repair perimeter</summary><div class="control-grid">
+        <label class="wide">Boundary<select id="repair-shape"><option value="0">None</option><option value="1" selected>Ellipse</option><option value="2">Rectangle</option><option value="3">Custom polygon</option></select></label>
+        <label>Half-width <output data-for="repair-x" data-unit=" mm"></output><input id="repair-x" type="range" min="2" max="28" step="0.5" value="8.5"></label>
+        <label>Half-height <output data-for="repair-y" data-unit=" mm"></output><input id="repair-y" type="range" min="2" max="24" step="0.5" value="8"></label>
+        <label>Boundary angle <output data-for="repair-angle" data-unit="°"></output><input id="repair-angle" type="range" min="-90" max="90" step="1" value="0"></label>
+        <div class="polygon-actions wide"><button id="draw-polygon" type="button">Draw polygon on tissue</button><button id="finish-polygon" type="button" disabled>Finish</button></div>
+      </div></details>
+      <details open><summary>Mending pattern</summary><div class="control-grid">
+        <label class="wide">Pattern<select id="pattern-kind"><option value="0">None</option><option value="1">Plain orthogonal darn</option><option value="2">Basket darn</option><option value="3">Running sashiko</option><option value="4">Hishi diamond lattice</option><option value="5">Asanoha-inspired hemp leaf</option><option value="6" selected>Traditional star darn</option></select></label>
+        <label>Pattern pitch <output data-for="pattern-spacing" data-unit=" mm"></output><input id="pattern-spacing" type="range" min="0.8" max="8" step="0.1" value="1.5"></label>
+        <label>Visible stitch <output data-for="stitch-length" data-unit=" mm"></output><input id="stitch-length" type="range" min="0.5" max="8" step="0.1" value="1.4"></label>
+        <label>Thread capacity <output data-for="thread-strength"></output><input id="thread-strength" type="range" min="0" max="4" step="0.05" value="1.4"></label>
+        <label>Thread width <output data-for="thread-width" data-unit=" mm"></output><input id="thread-width" type="range" min="0.1" max="1.5" step="0.05" value="0.5"></label>
+        <label>Pattern angle <output data-for="pattern-angle" data-unit="°"></output><input id="pattern-angle" type="range" min="-90" max="90" step="1" value="-8"></label>
+      </div></details>
+      <details><summary>Load transfer</summary><div class="control-grid">
+        <label>Pull angle <output data-for="load-angle" data-unit="°"></output><input id="load-angle" type="range" min="-90" max="90" step="1" value="0"></label>
+        <label>Transfer length <output data-for="transfer-length" data-unit=" mm"></output><input id="transfer-length" type="range" min="0.5" max="14" step="0.25" value="4.5"></label>
+        <label>Far-field tolerance <output data-for="tolerance" data-format="percent"></output><input id="tolerance" type="range" min="0.002" max="0.08" step="0.002" value="0.02"></label>
+        <label>Grid<select id="grid-size"><option value="97">97² · quick</option><option value="129" selected>129² · fast</option><option value="161">161² · balanced</option><option value="193">193² · fine</option></select></label>
+      </div></details>
+    </aside>
+
+    <section class="workspace">
+      <div class="visual-grid">
+        <article class="panel"><header><div><p class="kicker">Geometry</p><h2>Tissue and mending path</h2></div><span class="hint" id="draw-hint">Star darn: radial foundation with an over-under woven centre.</span></header><canvas id="tissue-canvas" aria-label="Base tissue, damage, repair perimeter and mending pattern"></canvas></article>
+        <article class="panel"><header><div><p class="kicker">Prediction</p><h2>Directional strength</h2></div><span class="hint">Undamaged tissue = 100%</span></header><canvas id="strength-canvas" aria-label="Heat map of expected local directional strength"></canvas><div class="legend" aria-label="Strength legend"><span>0%</span><span class="gradient"></span><span>100%</span><span class="gradient strong"></span><span>180%+</span></div></article>
+      </div>
+      <section class="metrics" aria-label="Simulation metrics">
+        <article><span>Mean over damage</span><strong id="metric-mean">—</strong></article><article><span>Weakest point</span><strong id="metric-min">—</strong></article><article><span>Peak reinforcement</span><strong id="metric-max">—</strong></article><article><span>Influence radius</span><strong id="metric-radius">—</strong></article><article><span>Mending thread</span><strong id="metric-thread">—</strong></article><article><span>Weak share of affected area</span><strong id="metric-weak">—</strong></article>
+      </section>
+      <section class="model-note"><h2>What the field means</h2><p>The Rust core treats the base cloth as an orthotropic membrane. Damage removes directional capacity; stitches deposit capacity along their tangent. A screened load-transfer solve spreads those changes until the requested far-field tolerance is met.</p><p>The star darn follows the traditional repair topology: radial foundation stitches bridge the hole, then one compact spiral follows the repair-specific under-two/back-over-one weave around the spokes. It is deliberately not a rectangular darn clipped into a star silhouette.</p><p>This remains a comparative design model, not a certified tear, seam, fatigue, or fracture calculation.</p></section>
+    </section>
+  </main>
+  <noscript>This simulator requires JavaScript and WebAssembly.</noscript>
+  <script type="module" src="app.js?v=20260816.rust-star-2"></script>
+</body>
+</html>

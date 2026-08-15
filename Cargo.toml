@@ -1,0 +1,24 @@
+[package]
+name = "darning-simulator"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Native and WebAssembly simulator for darning and decorative textile reinforcement"
+
+[lib]
+name = "darning_core"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "darning-render"
+path = "src/bin/render_svg.rs"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+inherits = "release"
