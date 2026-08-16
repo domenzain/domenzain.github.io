@@ -1,0 +1,31 @@
+name: Normalize darning release retry
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/normalize-darning-retry.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Publish one exact-author commit
+        env:
+          BASE_COMMIT: c6146202566104ad18f1cfe50e6945d9557fadad
+          EXPECTED_MAIN: ${{ github.sha }}
+          GIT_AUTHOR_NAME: M Domenzain
+          GIT_AUTHOR_EMAIL: git@domenza.in
+          GIT_COMMITTER_NAME: M Domenzain
+          GIT_COMMITTER_EMAIL: git@domenza.in
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/normalize-darning.yml .github/workflows/normalize-darning-retry.yml
+          git reset --soft "$BASE_COMMIT"
+          git commit -m 'Model anchored anisotropic load paths'
+          git push --force-with-lease="refs/heads/main:$EXPECTED_MAIN" origin HEAD:main
