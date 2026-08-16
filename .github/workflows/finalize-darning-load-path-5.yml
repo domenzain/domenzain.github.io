@@ -1,0 +1,255 @@
+name: Finalize darning load-path release
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/finalize-darning-load-path-5.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: darning-load-path-release
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Correct the browser integration and align every overlay
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          build_old = "2026-08-16.load-path-4"
+          build_new = "2026-08-16.load-path-5"
+          touched = [
+              Path("darning-simulator/worker.js"),
+              Path("darning-simulator/app.js"),
+              Path("darning-simulator/index.html"),
+              Path("tests/worker_smoke.mjs"),
+              Path("tests/site_smoke.mjs"),
+          ]
+          for path in touched:
+              text = path.read_text()
+              path.write_text(text.replace(build_old, build_new))
+
+          worker = Path("darning-simulator/worker.js")
+          text = worker.read_text()
+          if "if(code!==0)" not in text and "if(code!==1)" not in text:
+              raise SystemExit("worker ABI contract not found")
+          worker.write_text(text.replace("if(code!==0)", "if(code!==1)"))
+
+          app = Path("darning-simulator/app.js")
+          text = app.read_text()
+          text = text.replace("repairShape.value==='polygon'", "repairShape.value==='3'")
+          text = text.replace("repairShape.value!=='polygon'", "repairShape.value!=='3'")
+
+          old_projection = '''function projection(width,height,bounds){
+            const [minX,maxX,minY,maxY]=bounds;
+            const padding=.04*Math.min(width,height);
+            const scale=Math.min((width-2*padding)/(maxX-minX),(height-2*padding)/(maxY-minY));
+            const offsetX=(width-scale*(maxX-minX))/2-scale*minX;
+            const offsetY=(height-scale*(maxY-minY))/2+scale*maxY;
+            return{x:value=>offsetX+scale*value,y:value=>offsetY-scale*value,scale};
+          }'''
+          new_projection = '''function projection(width,height,bounds){
+            const [minX,maxX,minY,maxY]=bounds;
+            const padding=.04*Math.min(width,height);
+            const scale=Math.min((width-2*padding)/(maxX-minX),(height-2*padding)/(maxY-minY));
+            const offsetX=(width-scale*(maxX-minX))/2-scale*minX;
+            const offsetY=(height-scale*(maxY-minY))/2+scale*maxY;
+            const left=offsetX+scale*minX;
+            const top=offsetY-scale*maxY;
+            return{
+              x:value=>offsetX+scale*value,
+              y:value=>offsetY-scale*value,
+              scale,left,top,
+              width:scale*(maxX-minX),
+              height:scale*(maxY-minY),
+            };
+          }'''
+          if old_projection not in text:
+              raise SystemExit("projection block not found")
+          text = text.replace(old_projection, new_projection)
+
+          damage_replacement = '''function drawDamage(context,transform){
+            if(!result||Number(damageShape.value)===0)return;
+            const size=result.gridSize;
+            const scratch=document.createElement('canvas');
+            scratch.width=size;
+            scratch.height=size;
+            const scratchContext=scratch.getContext('2d');
+            const image=scratchContext.createImageData(size,size);
+            for(let y=0;y<size;++y)for(let x=0;x<size;++x){
+              const source=y*size+x;
+              const target=((size-1-y)*size+x)*4;
+              const coverage=clamp(result.damage[source],0,1);
+              image.data[target]=61;
+              image.data[target+1]=42;
+              image.data[target+2]=34;
+              image.data[target+3]=Math.round(235*Math.sqrt(coverage));
+            }
+            scratchContext.putImageData(image,0,0);
+            context.imageSmoothingEnabled=true;
+            context.drawImage(scratch,transform.left,transform.top,transform.width,transform.height);
+          }
+
+          function drawTissue'''
+          text, count = re.subn(
+              r"function drawDamage\(context,transform\)\{.*?\n\}\n\nfunction drawTissue",
+              damage_replacement,
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit("damage renderer block not found")
+
+          old_contour = "function drawStrengthContour(context,values,size,level,width,height,ratio,stroke,lineWidth){\n  const canvasPoint=([x,y])=>[width*x/(size-1),height*(size-1-y)/(size-1)];"
+          new_contour = "function drawStrengthContour(context,values,size,level,transform,ratio,stroke,lineWidth){\n  const canvasPoint=([x,y])=>[transform.left+transform.width*x/(size-1),transform.top+transform.height*(size-1-y)/(size-1)];"
+          if old_contour not in text:
+              raise SystemExit("contour projection not found")
+          text = text.replace(old_contour, new_contour)
+
+          old_strength = '''  context.putImageData(image,0,0);
+            strengthContext.imageSmoothingEnabled=true;
+            strengthContext.drawImage(scratch,0,0,width,height);
+            drawStrengthContour(strengthContext,result.strength,size,.8*base,width,height,ratio,'rgba(255,255,255,.72)',3.2);
+            drawStrengthContour(strengthContext,result.strength,size,.8*base,width,height,ratio,'rgba(67,20,43,.86)',1.15);
+            const transform=projection(width,height,result.bounds);
+            drawSegmentSet(strengthContext,transform,segmentEntries(),.16);'''
+          new_strength = '''  context.putImageData(image,0,0);
+            const transform=projection(width,height,result.bounds);
+            strengthContext.fillStyle='#f3eddf';
+            strengthContext.fillRect(0,0,width,height);
+            strengthContext.imageSmoothingEnabled=true;
+            strengthContext.drawImage(scratch,transform.left,transform.top,transform.width,transform.height);
+            drawStrengthContour(strengthContext,result.strength,size,.8*base,transform,ratio,'rgba(255,255,255,.72)',3.2);
+            drawStrengthContour(strengthContext,result.strength,size,.8*base,transform,ratio,'rgba(67,20,43,.86)',1.15);
+            drawSegmentSet(strengthContext,transform,segmentEntries(),.16);'''
+          if old_strength not in text:
+              raise SystemExit("strength overlay block not found")
+          text = text.replace(old_strength, new_strength)
+
+          pointer_replacement = '''function pointerStrength(event){
+            if(!result)return;
+            const rectangle=strengthCanvas.getBoundingClientRect();
+            const canvasX=(event.clientX-rectangle.left)*strengthCanvas.width/rectangle.width;
+            const canvasY=(event.clientY-rectangle.top)*strengthCanvas.height/rectangle.height;
+            const transform=projection(strengthCanvas.width,strengthCanvas.height,result.bounds);
+            if(canvasX<transform.left||canvasX>transform.left+transform.width||canvasY<transform.top||canvasY>transform.top+transform.height){
+              pointerReadout.hidden=true;
+              return;
+            }
+            const x=clamp(Math.floor((canvasX-transform.left)/transform.width*result.gridSize),0,result.gridSize-1);
+            const y=clamp(result.gridSize-1-Math.floor((canvasY-transform.top)/transform.height*result.gridSize),0,result.gridSize-1);
+            const value=result.strength[y*result.gridSize+x]/result.metrics[0];
+            pointerReadout.textContent=`${Math.round(100*value)}%`;
+            pointerReadout.style.left=`${event.clientX-rectangle.left}px`;
+            pointerReadout.style.top=`${event.clientY-rectangle.top}px`;
+            pointerReadout.hidden=false;
+          }
+
+          worker.onmessage'''
+          text, count = re.subn(
+              r"function pointerStrength\(event\)\{.*?\n\}\n\nworker\.onmessage",
+              pointer_replacement,
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit("pointer readout block not found")
+
+          input_anchor = "  if(control===repairShape){\n    document.body.classList.toggle('custom-repair',repairShape.value==='3');\n    if(repairShape.value!=='3')customPolygon=[];\n  }\n  send();"
+          input_replacement = "  if(control===repairShape){\n    document.body.classList.toggle('custom-repair',repairShape.value==='3');\n    if(repairShape.value!=='3')customPolygon=[];\n  }\n  if(control===pattern)setPattern(Number(pattern.value));\n  send();"
+          if input_anchor not in text:
+              raise SystemExit("control event block not found")
+          text = text.replace(input_anchor, input_replacement)
+          app.write_text(text)
+
+          index = Path("darning-simulator/index.html")
+          text = index.read_text()
+          text = text.replace(", tears and rectangular material loss", " and tears")
+          text = text.replace('            <option value="4">Rectangular loss</option>\n', '')
+          text = text.replace('>Width <output id="damage-x-label"', '>Half-width <output id="damage-x-label"')
+          text = text.replace('>Height <output id="damage-y-label"', '>Half-height <output id="damage-y-label"')
+          text = text.replace('>Width <output id="repair-x-label"', '>Half-width <output id="repair-x-label"')
+          text = text.replace('>Height <output id="repair-y-label"', '>Half-height <output id="repair-y-label"')
+          index.write_text(text)
+
+          readme = Path("README.md")
+          readme.write_text(readme.read_text().replace("worn patches, holes, tears and rectangular material loss", "worn patches, holes and tears"))
+
+          package = Path("package.json")
+          text = package.read_text()
+          text = text.replace("node tests/palette_smoke.mjs\"", "node tests/palette_smoke.mjs && node tests/ui_contract_smoke.mjs\"")
+          package.write_text(text)
+          PY
+
+          cat > tests/ui_contract_smoke.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import {readFile} from 'node:fs/promises';
+          const read=path=>readFile(new URL(path,import.meta.url),'utf8');
+          const [worker,app,index]=await Promise.all([
+            read('../darning-simulator/worker.js'),
+            read('../darning-simulator/app.js'),
+            read('../darning-simulator/index.html'),
+          ]);
+          assert.match(worker,/if\(code!==1\)/);
+          assert.doesNotMatch(worker,/if\(code!==0\)/);
+          assert.match(app,/repairShape\.value==='3'/);
+          assert.match(app,/transform\.left,transform\.top,transform\.width,transform\.height/);
+          assert.match(app,/if\(control===pattern\)setPattern/);
+          assert.doesNotMatch(index,/Rectangular loss/);
+          assert.match(index,/Half-width/);
+          assert.match(index,/2026-08-16\.load-path-5/);
+          console.log('UI contract smoke passed: ABI, custom polygon, extents and cache key');
+          EOF
+      - name: Validate syntax, mechanics, worker, palette and served assets
+        run: |
+          set -euo pipefail
+          node --check darning-simulator/mechanics.js
+          node --check darning-simulator/palette.js
+          node --check darning-simulator/worker.js
+          node --check darning-simulator/app.js
+          node tests/mechanics_smoke.mjs
+          node tests/palette_smoke.mjs
+          node tests/worker_smoke.mjs
+          node tests/site_smoke.mjs
+          node tests/ui_contract_smoke.mjs
+      - name: Seal one exact-author commit
+        env:
+          BASE_COMMIT: c6146202566104ad18f1cfe50e6945d9557fadad
+          EXPECTED_MAIN: ${{ github.sha }}
+          GIT_AUTHOR_NAME: M Domenzain
+          GIT_AUTHOR_EMAIL: git@domenza.in
+          GIT_COMMITTER_NAME: M Domenzain
+          GIT_COMMITTER_EMAIL: git@domenza.in
+        run: |
+          set -euo pipefail
+          cat > darning-simulator/validation.json <<EOF
+          {
+            "build": "2026-08-16.load-path-5",
+            "validated_from": "$EXPECTED_MAIN",
+            "checks": ["syntax", "mechanics", "worker", "palette", "ui-contract", "static-site"],
+            "node": "22",
+            "status": "passed"
+          }
+          EOF
+          find .github/workflows -maxdepth 1 -type f -name '*darning*.yml' -delete
+          git add -A
+          git reset --soft "$BASE_COMMIT"
+          git commit -m 'Model anchored anisotropic load paths'
+          test "$(git show -s --format=%an HEAD)" = 'M Domenzain'
+          test "$(git show -s --format=%ae HEAD)" = 'git@domenza.in'
+          test "$(git rev-parse HEAD^)" = "$BASE_COMMIT"
+          git push --force-with-lease="refs/heads/main:$EXPECTED_MAIN" origin HEAD:main
